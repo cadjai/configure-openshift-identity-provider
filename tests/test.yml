@@ -1,0 +1,7 @@
+---
+- hosts: localhost
+  remote_user: root
+  roles:
+    - role_name=configure-openshift-identity-provider
+      provider_type: 'keycloak'
+      provider_name: 'my-keycloak-client'

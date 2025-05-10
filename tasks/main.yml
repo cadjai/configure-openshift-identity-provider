@@ -1,0 +1,46 @@
+---
+- name: create keycloak oidc provider secret
+  ansible.builtin.shell: >
+    {{ openshift_cli }} create secret generic {{ keycloak_secret_name }} -n openshift-config \
+            --from-literal=clientSecret={{ keycloak_secret }} \
+            --dry-run=client -o yaml | oc replace -f - -n openshift-config
+  when:
+    - keycloak_secret_name is defined
+    - keycloak_secret_name != '' 
+  register: keycloak_secret_replaced
+
+- name: create htpasswd oidc provider secret
+  ansible.builtin.shell: >
+    {{ openshift_cli }} create secret generic {{ htpasswd_secret_name }} -n openshift-config \
+            --from-file=htpasswd={{ credential_file_path }} \
+            --dry-run=client -o yaml | oc replace -f - -n openshift-config
+  when:
+    - htpasswd_secret_name is defined
+    - htpasswd_secret_name != '' 
+  register: htpasswd_secret_replaced
+
+- name: create htpasswd oidc provider secret
+  ansible.builtin.shell: >
+    {{ openshift_cli }} oauth cluster -o name 
+  register: oauth_cluster_exist 
+
+- name: create cr file
+  ansible.builtin.template: 
+    src: templates/oauth_cr.j2
+    dest: "{{ staging_dir | default('/tmp', true)}}/{{ provider_name }}-oauth_cr"
+    force: yes
+  register: oauth_cr_rendered 
+
+- name: deploy CR
+  ansible.builtin.shell: >
+    {{ openshift_cli }} patch oauth cluster --type merge --patch-file={{ oauth_cr_rendered.dest }} 
+  when:
+    - oauth_cluster_exist.rc is defined
+    - oauth_cluster_exist.rc == 0 
+    - oauth_cluster_exist.stdout is defined
+    - oauth_cluster_exist.stdout != '' 
+    - oauth_cr_rendered is defined 
+    - oauth_cr_rendered.dest is defined 
+    - oauth_cr_rendered.state is defined 
+    - "'file' in oauth_cr_rendered.state"  
+  register: oauth_cr_applied 

@@ -1,0 +1,30 @@
+{% if provider_type is defined and provider_type == "keycloak" %}
+    - mappingMethod: claim
+      name: "{{ provider_name }}"
+      openID:
+        claims:
+          email:
+            - email
+          name:
+            - commonName
+          preferredUsername:
+            - commonName
+        clientID: "{{ client_ID }}"
+        clientSecret:
+          name: "{{ keycloak_secret_name }}"
+{% if use_keycloak_ca is defined and use_keycloak_ca | bool %}
+        ca:
+          name: "{{ keycloak_ca_cm_name }}"
+{% endif %}
+        extraScopes: []
+        issuer: "{{ issuer_url }}"
+      type: OpenID
+{% elseif  provider_type == "htpasswd" %}
+    - mappingMethod: claim
+      name: "{{ provider_name }}"
+      htpasswd:
+        fileData:
+          name: "{{ htpasswd_secret_name }}"
+      type: HTPasswd
+
+{% endif %}

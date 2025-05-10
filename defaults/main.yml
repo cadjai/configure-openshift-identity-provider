@@ -1,0 +1,10 @@
+---
+openshift_cli: '/usr/bin/oc'
+provider_name: "{{ provider_name }}"  ### could be any string for the provider
+client_ID: "{{ client_ID }}"   ### client ID for the keycloak provider
+client_secret: "{{ client_secret }}" ### client secret for the keycloak provider
+issuer_url: "{{ issuer_url }}"  ### issuer url for the keycloak provider
+provider_type: "keycloak"   ### the provider type , can be keycloak or htpasswd for now
+keycloak_secret_name: "{{ keycloak_secret_name }}"  ### keycloak provider secret name 
+htpasswd_secret_name: "{{ htpasswd_secret_name }}" ### htpasswd provider secret name
+staging_dir: '/tmp'

@@ -3,7 +3,7 @@
   ansible.builtin.shell: >
     {{ openshift_cli }} create secret generic {{ keycloak_secret_name }} -n openshift-config \
             --from-literal=clientSecret={{ keycloak_secret }} \
-            --dry-run=client -o yaml | oc replace -f - -n openshift-config
+            --dry-run=client -o yaml | oc replace -f - -n openshift-config --force
   when:
     - keycloak_secret_name is defined
     - keycloak_secret_name != '' 
@@ -13,7 +13,7 @@
   ansible.builtin.shell: >
     {{ openshift_cli }} create secret generic {{ htpasswd_secret_name }} -n openshift-config \
             --from-file=htpasswd={{ credential_file_path }} \
-            --dry-run=client -o yaml | oc replace -f - -n openshift-config
+            --dry-run=client -o yaml | oc replace -f - -n openshift-config --force
   when:
     - htpasswd_secret_name is defined
     - htpasswd_secret_name != '' 
@@ -21,26 +21,90 @@
 
 - name: create htpasswd oidc provider secret
   ansible.builtin.shell: >
-    {{ openshift_cli }} oauth cluster -o name 
+    {{ openshift_cli }} get oauth cluster -o name 
   register: oauth_cluster_exist 
 
-- name: create cr file
-  ansible.builtin.template: 
-    src: templates/oauth_cr.j2
-    dest: "{{ staging_dir | default('/tmp', true)}}/{{ provider_name }}-oauth_cr"
-    force: yes
-  register: oauth_cr_rendered 
+- name: '{{ ansible_name_module }} | set_fact | set oauth cluster file path'
+  ansible.builtin.set_fact:
+    oauth_cluster_cr_file: "{{ staging_dir | default('/tmp', true) }}/{{ provider_name }}-{{ ansible_date_time.date }}.yml"
+
+- name: '{{ ansible_name_module }} | set_fact | set oauth cluster file path'
+  ansible.builtin.set_fact:
+    oauth_cluster_provider_data: "{{ lookup('template', 'templates/oauth_cr.j2') }}"
+
+- name: Retreieve exoisting CR
+  ansible.builtin.shell: >
+    {{ openshift_cli }} get oauth cluster -o yaml > {{ oauth_cluster_cr_file }} 
+  register: oauth_cluster_retrieved
+
+- name: Remove unecessary metadata from exported file 
+  when:
+    - oauth_cluster_retrieved is defined
+    - oauth_cluster_retrieved.rc is defined
+    - oauth_cluster_retrieved.rc == 0
+  block: 
+    - name: Remove unecessary metadata from exported file 1 of 6
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        regexp: "creationTimestamp:"
+        state: absent
+
+    - name: Remove unecessary metadata from exported file 2 of 6
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        regexp: "generation:"
+        state: absent
+
+    - name: Remove unecessary metadata from exported file 3 of 6
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        regexp: "release.openshift.io/create-only:"
+        state: absent
+
+    - name: Remove unecessary metadata from exported file 4 of 6
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        regexp: "resourceVersion:"
+        state: absent
+
+    - name: Remove unecessary metadata from exported file 5 of 6
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        regexp: "uid:"
+        state: absent
+
+    - name: Add Markers to mark Managed Field block in CM 1 of 2
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        insertbefore: "  ownerReferences:"
+        line: "# BEGIN ANSIBLE MANAGED BLOCK Removing Owner Reference Block"
+
+    - name: Add Markers to mark Managed Field block in CM 2 of 2
+      ansible.builtin.lineinfile:
+        path: "{{ oauth_cluster_cr_file }}"
+        insertbefore: "spec"
+        line: "# END ANSIBLE MANAGED BLOCK Removing Owner Reference Block"
+
+    - name: Remove unecessary metadata from exported file 6 of 6
+      ansible.builtin.blockinfile:
+        marker: "# {mark} ANSIBLE MANAGED BLOCK Removing Owner Reference Block"
+        path: "{{ oauth_cluster_cr_file }}"
+        state: absent
+        block: |
+          ownerReferences:
+          - apiVersion: config.openshift.io/v1
+            kind: ClusterVersion
+            name: version
+
+- name: '{{ ansible_name_module }} | Replace Providers block'
+  ansible.builtin.blockinfile:
+    block: |
+      {{ oauth_cluster_provider_data }}
+    path: "{{ oauth_cluster_cr_file }}"
+    backup: true
+    insertafter: "identityProviders"
 
 - name: deploy CR
   ansible.builtin.shell: >
-    {{ openshift_cli }} patch oauth cluster --type merge --patch-file={{ oauth_cr_rendered.dest }} 
-  when:
-    - oauth_cluster_exist.rc is defined
-    - oauth_cluster_exist.rc == 0 
-    - oauth_cluster_exist.stdout is defined
-    - oauth_cluster_exist.stdout != '' 
-    - oauth_cr_rendered is defined 
-    - oauth_cr_rendered.dest is defined 
-    - oauth_cr_rendered.state is defined 
-    - "'file' in oauth_cr_rendered.state"  
+    {{ openshift_cli }} replace -f  {{ oauth_cluster_cr_file }}
   register: oauth_cr_applied 
